@@ -20,8 +20,12 @@ int            GlobalHelp( int argc, const char * argv[] );
 lsl_outlet        InitLSL( DSI_Headset h, const char * streamName);
 void             OnSample( DSI_Headset h, double packetOffsetTime, void * userData);
 void      getRandomString( char *s, const int len);
+
 const char * GetStringOpt( int argc, const char * argv[], const char * keyword1, const char * keyword2 );
 int         GetIntegerOpt( int argc, const char * argv[], const char * keyword1, const char * keyword2, int defaultValue );
+const char * GetConfigValue(const char *configPath, const char *key);
+const char * ResolveStringOpt(int argc, const char * argv[], const char * keyword1, const char * keyword2, const char * envName, const char * configPath, const char * configKey);
+int ResolveIntegerOpt(int argc, const char * argv[], const char * keyword1, const char * keyword2, const char * envName, const char * configPath, const char * configKey, int defaultValue);
 
 float *sample;
 static volatile int KeepRunning = 1;
@@ -60,7 +64,8 @@ int main( int argc, const char * argv[] )
   }
 
   // Initialize LSL outlet
-  const char * streamName = GetStringOpt(  argc, argv, "lsl-stream-name",   "m" );
+  const char * configPath = GetStringOpt( argc, argv, "config", "c" );
+  const char * streamName = ResolveStringOpt( argc, argv, "lsl-stream-name", "m", "DSI2LSL_STREAM_NAME", configPath, "lsl_stream_name" );
   if (!streamName) 
 		streamName = "WS-default";
   printf("Initializing %s outlet\n", streamName);
@@ -110,10 +115,11 @@ int StartUp( int argc, const char * argv[], DSI_Headset * headsetOut, int * help
 
   // read out any configuration options
   int          help       = GetStringOpt(  argc, argv, "help",      "h" ) != NULL;
-  const char * serialPort = GetStringOpt(  argc, argv, "port",      "p" );
-  const char * montage    = GetStringOpt(  argc, argv, "montage",   "m" );
-  const char * reference  = GetStringOpt(  argc, argv, "reference", "r" );
-  int          verbosity  = GetIntegerOpt( argc, argv, "verbosity", "v", 2 );
+  const char * configPath = GetStringOpt( argc, argv, "config", "c" );
+  const char * serialPort = ResolveStringOpt( argc, argv, "port", "p", "DSI2LSL_PORT", configPath, "port" );
+  const char * montage    = ResolveStringOpt( argc, argv, "montage", "M", "DSI2LSL_MONTAGE", configPath, "montage" );
+  const char * reference  = ResolveStringOpt( argc, argv, "reference", "r", "DSI2LSL_REFERENCE", configPath, "reference" );
+  int          verbosity  = ResolveIntegerOpt( argc, argv, "verbosity", "v", "DSI2LSL_VERBOSITY", configPath, "verbosity", 2 );
   if( headsetOut ) *headsetOut = NULL;
   if( helpOut ) *helpOut = help;
   if( help ) return 0;
@@ -252,6 +258,9 @@ int GlobalHelp( int argc, const char * argv[] )
             "       (can also be space-delimited, but then you would need to enclose the\n"
             "       option in quotes on the command-line).\n"
             "\n"
+            "  --config\n"
+            "       Optional config file path (key=value per line).\n"
+            "\n"
             "  --reference\n"
             "       The name of sensor (or linear combination of sensors, without spaces)\n"
             "       to be used as reference. Defaults to a \"traditional\" averaged-ears or\n"
@@ -317,4 +326,53 @@ int GetIntegerOpt( int argc, const char * argv[], const char * keyword1, const c
     if( !end || !*end ) return result;
     fprintf( stderr, "WARNING: could not interpret \"%s\" as a valid integer value for the \"%s\" option - reverting to default value %s=%g\n", stringValue, keyword1, keyword1, ( double )defaultValue );
     return defaultValue;
+}
+
+
+const char * GetConfigValue(const char *configPath, const char *key)
+{
+  static char value[512];
+  static char line[1024];
+  FILE *f;
+  char *eq;
+  if(!configPath || !key) return NULL;
+  f = fopen(configPath, "r");
+  if(!f) return NULL;
+  while(fgets(line, sizeof(line), f)){
+    if(line[0] == '#' || line[0] == ';' || line[0] == '\n') continue;
+    eq = strchr(line, '=');
+    if(!eq) continue;
+    *eq = '\0';
+    if(strcmp(line, key) == 0){
+      strncpy(value, eq + 1, sizeof(value)-1);
+      value[sizeof(value)-1] = '\0';
+      value[strcspn(value, "\r\n")] = '\0';
+      fclose(f);
+      return value;
+    }
+  }
+  fclose(f);
+  return NULL;
+}
+
+const char * ResolveStringOpt(int argc, const char * argv[], const char * keyword1, const char * keyword2, const char * envName, const char * configPath, const char * configKey)
+{
+  const char *v = GetStringOpt(argc, argv, keyword1, keyword2);
+  if(v && v[0]) return v;
+  v = getenv(envName);
+  if(v && v[0]) return v;
+  v = GetConfigValue(configPath, configKey);
+  if(v && v[0]) return v;
+  return NULL;
+}
+
+int ResolveIntegerOpt(int argc, const char * argv[], const char * keyword1, const char * keyword2, const char * envName, const char * configPath, const char * configKey, int defaultValue)
+{
+  const char *v = GetStringOpt(argc, argv, keyword1, keyword2);
+  if(v) return atoi(v);
+  v = getenv(envName);
+  if(v) return atoi(v);
+  v = GetConfigValue(configPath, configKey);
+  if(v) return atoi(v);
+  return defaultValue;
 }

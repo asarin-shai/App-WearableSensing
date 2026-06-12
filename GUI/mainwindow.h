@@ -28,6 +28,8 @@ private slots:
     void writeToConsole();
     QStringList parseArguments();
     void timerEvent(QTimerEvent *event);
+    void loadConfiguration();
+    void saveConfiguration();
 
 private:
     Ui::MainWindow *ui;
